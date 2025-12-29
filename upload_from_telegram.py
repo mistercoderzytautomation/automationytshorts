@@ -1,27 +1,28 @@
 import os
 import json
-import requests
 import tempfile
+from telethon import TelegramClient
+from telethon.tl.types import MessageMediaVideo
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
-CLIENT_SECRET_JSON = os.environ["YOUTUBE_CLIENT_SECRET_JSON"]
+# ===== ENV =====
+API_ID = int(os.environ["TELEGRAM_API_ID"])
+API_HASH = os.environ["TELEGRAM_API_HASH"]
+PHONE = os.environ["TG_PHONE"]
+CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
+YOUTUBE_JSON = os.environ["YOUTUBE_CLIENT_SECRET_JSON"]
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 STATE_FILE = "state.json"
 TOKEN_FILE = "token.json"
 
-def get_updates():
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    return requests.get(url).json()["result"]
-
+# ===== STATE =====
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"last_index": 0}
+        return {"last_msg_id": 0}
     with open(STATE_FILE, "r") as f:
         return json.load(f)
 
@@ -29,9 +30,10 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
 
-def get_youtube_service():
+# ===== YOUTUBE =====
+def get_youtube():
     with open("client_secret.json", "w") as f:
-        f.write(CLIENT_SECRET_JSON)
+        f.write(YOUTUBE_JSON)
 
     creds = None
     if os.path.exists(TOKEN_FILE):
@@ -42,29 +44,14 @@ def get_youtube_service():
             "client_secret.json", SCOPES
         )
         creds = flow.run_console()
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
+        with open(TOKEN_FILE, "w") as f:
+            f.write(creds.to_json())
 
     return build("youtube", "v3", credentials=creds)
 
-def download_video(file_id):
-    file_info = requests.get(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}"
-    ).json()
-    file_path = file_info["result"]["file_path"]
-
-    video_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-    video_data = requests.get(video_url).content
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    tmp.write(video_data)
-    tmp.close()
-    return tmp.name
-
-def upload_to_youtube(video_path, title):
-    youtube = get_youtube_service()
-
-    request = youtube.videos().insert(
+def upload_to_youtube(path, title):
+    yt = get_youtube()
+    yt.videos().insert(
         part="snippet,status",
         body={
             "snippet": {
@@ -73,40 +60,35 @@ def upload_to_youtube(video_path, title):
                 "tags": ["shorts"],
                 "categoryId": "22"
             },
-            "status": {
-                "privacyStatus": "public"
-            }
+            "status": {"privacyStatus": "public"}
         },
-        media_body=MediaFileUpload(video_path)
-    )
-    request.execute()
+        media_body=MediaFileUpload(path)
+    ).execute()
 
-def main():
-    updates = get_updates()
-    videos = []
-
-    for u in updates:
-        post = u.get("channel_post")
-        if post and "video" in post:
-            if str(post["chat"]["id"]) == CHANNEL_ID:
-                videos.append(post["video"]["file_id"])
-
-    videos.sort()
+# ===== MAIN =====
+async def main():
     state = load_state()
 
-    if state["last_index"] >= len(videos):
-        print("No videos left.")
-        return
+    client = TelegramClient("session", API_ID, API_HASH)
+    await client.start(phone=PHONE)
 
-    file_id = videos[state["last_index"]]
-    print("Uploading video index:", state["last_index"])
+    async for msg in client.iter_messages(CHANNEL_ID, min_id=state["last_msg_id"]):
+        if msg.id <= state["last_msg_id"]:
+            continue
 
-    video_path = download_video(file_id)
-    upload_to_youtube(video_path, f"Daily Short #{state['last_index'] + 1}")
+        if msg.video:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            await client.download_media(msg.video, tmp.name)
 
-    state["last_index"] += 1
-    save_state(state)
-    print("Upload complete.")
+            upload_to_youtube(tmp.name, f"Daily Short #{msg.id}")
+
+            state["last_msg_id"] = msg.id
+            save_state(state)
+            print("Uploaded video, message ID:", msg.id)
+            return
+
+    print("No new videos found.")
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
