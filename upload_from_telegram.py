@@ -3,114 +3,87 @@ import json
 import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.tl.types import MessageMediaVideo
 
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 
-# ---------------- CONFIG ----------------
-
+# ================== ENV ==================
 API_ID = int(os.environ["TELEGRAM_API_ID"])
 API_HASH = os.environ["TELEGRAM_API_HASH"]
-SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
-
+SESSION = os.environ["TELEGRAM_SESSION"]
 CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
+YOUTUBE_JSON = os.environ["YOUTUBE_CLIENT_SECRET_JSON"]
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
-USED_FILE = "used_messages.json"
+STATE_FILE = "uploaded_ids.json"
 VIDEO_FILE = "video.mp4"
 
-# ---------------------------------------
+# ================== STATE ==================
+def load_uploaded_ids():
+    if not os.path.exists(STATE_FILE):
+        return set()
+    with open(STATE_FILE, "r") as f:
+        return set(json.load(f))
 
+def save_uploaded_ids(ids):
+    with open(STATE_FILE, "w") as f:
+        json.dump(list(ids), f)
 
-def load_used():
-    if os.path.exists(USED_FILE):
-        with open(USED_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
-
-
-def save_used(data):
-    with open(USED_FILE, "w") as f:
-        json.dump(list(data), f)
-
-
+# ================== YOUTUBE ==================
 def get_youtube():
-    creds = None
-
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            "client_secret.json", SCOPES
-        )
-        creds = flow.run_console()
-        with open("token.json", "w") as f:
-            f.write(creds.to_json())
-
+    creds = Credentials.from_authorized_user_info(json.loads(YOUTUBE_JSON))
     return build("youtube", "v3", credentials=creds)
 
+def upload_to_youtube(path, title, description):
+    yt = get_youtube()
 
-async def main():
-    used = load_used()
-
-    client = TelegramClient(
-        StringSession(SESSION_STRING) if SESSION_STRING else "session",
-        API_ID,
-        API_HASH,
+    request = yt.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": title[:100],
+                "description": description,
+                "tags": ["shorts", "viral"],
+                "categoryId": "22",
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False,
+            },
+        },
+        media_body=MediaFileUpload(path, resumable=True),
     )
 
-    await client.start()
+    response = request.execute()
+    print("✅ Uploaded:", response["id"])
 
-    async for msg in client.iter_messages(CHANNEL_ID, reverse=True):
-        if msg.id in used:
-            continue
+# ================== MAIN ==================
+async def main():
+    uploaded_ids = load_uploaded_ids()
 
-        if not msg.video:
-            continue
+    async with TelegramClient(StringSession(SESSION), API_ID, API_HASH) as client:
+        async for msg in client.iter_messages(CHANNEL_ID):
+            if not msg.video:
+                continue
 
-        # ---------- DOWNLOAD ----------
-        await client.download_media(msg.video, VIDEO_FILE)
+            if msg.id in uploaded_ids:
+                continue
 
-        title = msg.text.strip() if msg.text else "Daily Short"
-        description = title
+            print("⬇ Downloading video...")
+            await msg.download_media(VIDEO_FILE)
 
-        # ---------- UPLOAD ----------
-        youtube = get_youtube()
+            title = msg.text.split("\n")[0] if msg.text else "YouTube Short"
+            description = msg.text if msg.text else "Uploaded via automation"
 
-        request = youtube.videos().insert(
-            part="snippet,status",
-            body={
-                "snippet": {
-                    "title": title[:95],
-                    "description": description,
-                    "categoryId": "22",
-                },
-                "status": {
-                    "privacyStatus": "public",
-                    "selfDeclaredMadeForKids": False,
-                },
-            },
-            media_body=MediaFileUpload(VIDEO_FILE, chunksize=-1, resumable=True),
-        )
+            upload_to_youtube(VIDEO_FILE, title, description)
 
-        response = request.execute()
-        print("Uploaded:", response["id"])
+            uploaded_ids.add(msg.id)
+            save_uploaded_ids(uploaded_ids)
 
-        used.add(msg.id)
-        save_used(used)
+            os.remove(VIDEO_FILE)
+            return
 
-        os.remove(VIDEO_FILE)
-        break
+        print("⚠ No new videos found.")
 
-    else:
-        print("No new videos left.")
-
-    await client.disconnect()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
