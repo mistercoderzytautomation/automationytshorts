@@ -1,28 +1,32 @@
-name: Daily Telegram Shorts Automation
+name: Daily YouTube Shorts Upload
 
 on:
   schedule:
-    - cron: "30 4 * * *"   # 9:30 AM IST
+    # Runs every day at 09:30 IST (04:00 UTC)
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 jobs:
-  run-script:
+  upload:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests google-api-python-client google-auth google-auth-oauthlib
 
-      - name: Run automation script
+      - name: Run uploader
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-        run: python upload_from_telegram.py
+          YOUTUBE_CLIENT_SECRET_JSON: ${{ secrets.YOUTUBE_CLIENT_SECRET_JSON }}
+        run: |
+          python upload_from_telegram.py
