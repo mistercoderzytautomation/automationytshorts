@@ -15,6 +15,21 @@ SESSION = os.environ["TELEGRAM_SESSION"]
 CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
 YOUTUBE_JSON = os.environ["YOUTUBE_CLIENT_SECRET_JSON"]
 
+# ========= CONSTANT METADATA (SAME FOR ALL VIDEOS) =========
+VIDEO_TITLE = "🔥 Daily Tech Short #Shorts"
+VIDEO_DESCRIPTION = (
+    "Daily tech content uploaded automatically 🚀\n\n"
+    "#shorts #technology #coding #automation"
+)
+VIDEO_TAGS = [
+    "shorts",
+    "technology",
+    "coding",
+    "automation",
+    "programming",
+    "tech"
+]
+
 # ========= FILES =========
 STATE_FILE = "uploaded_ids.json"
 VIDEO_FILE = "video.mp4"
@@ -51,23 +66,27 @@ async def main():
             part="snippet,status",
             body={
                 "snippet": {
-                    "title": msg.text[:100] if msg.text else "Daily Short",
-                    "description": msg.text or "",
-                    "tags": ["shorts"],
+                    "title": VIDEO_TITLE,
+                    "description": VIDEO_DESCRIPTION,
+                    "tags": VIDEO_TAGS,
                     "categoryId": "22"
                 },
                 "status": {
                     "privacyStatus": "public"
                 }
             },
-            media_body=MediaFileUpload(VIDEO_FILE, chunksize=-1, resumable=True)
+            media_body=MediaFileUpload(
+                VIDEO_FILE,
+                chunksize=-1,
+                resumable=True
+            )
         )
 
         response = request.execute()
         print("Uploaded:", response["id"])
 
         uploaded_ids.add(msg.id)
-        break  # ✅ upload ONLY ONE per run
+        break  # ✅ upload ONLY ONE video per run
 
     with open(STATE_FILE, "w") as f:
         json.dump(list(uploaded_ids), f)
