@@ -15,19 +15,18 @@ SESSION = os.environ["TELEGRAM_SESSION"]
 CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
 YOUTUBE_JSON = os.environ["YOUTUBE_CLIENT_SECRET_JSON"]
 
-# ========= CONSTANT METADATA (SAME FOR ALL VIDEOS) =========
-VIDEO_TITLE = "🔥 Daily Tech Short #Shorts"
+# ========= CONSTANT METADATA =========
+VIDEO_TITLE = "Watch Till the End 👀🔥 #shorts"
 VIDEO_DESCRIPTION = (
-    "Daily tech content uploaded automatically 🚀\n\n"
-    "#shorts #technology #coding #automation"
+    "🔥 Daily Shorts uploaded automatically\n\n"
+    "#shorts #reels #viral #trending"
 )
 VIDEO_TAGS = [
     "shorts",
-    "technology",
-    "coding",
-    "automation",
-    "programming",
-    "tech"
+    "reels",
+    "viral",
+    "trending",
+    "dailyshorts"
 ]
 
 # ========= FILES =========
@@ -54,12 +53,10 @@ async def main():
     async for msg in client.iter_messages(CHANNEL_ID, limit=20):
         if not msg.video:
             continue
-
         if msg.id in uploaded_ids:
             continue
 
         print(f"Uploading video from Telegram msg {msg.id}")
-
         await msg.download_media(file=VIDEO_FILE)
 
         request = youtube.videos().insert(
@@ -72,7 +69,9 @@ async def main():
                     "categoryId": "22"
                 },
                 "status": {
-                    "privacyStatus": "public"
+                    "privacyStatus": "public",
+                    "madeForKids": False,
+                    "selfDeclaredMadeForKids": False
                 }
             },
             media_body=MediaFileUpload(
@@ -86,7 +85,7 @@ async def main():
         print("Uploaded:", response["id"])
 
         uploaded_ids.add(msg.id)
-        break  # ✅ upload ONLY ONE video per run
+        break  # ✅ ONE video per run
 
     with open(STATE_FILE, "w") as f:
         json.dump(list(uploaded_ids), f)
